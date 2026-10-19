@@ -45,17 +45,17 @@ jobs:
             exit 1
           fi
 
-          cat > UPSTREAM.md <<EOF
-          # Upstream source
-
-          - Project: https://github.com/HKUDS/nanobot
-          - Revision: `$version`
-          - Imported as a source snapshot under `upstream/nanobot/`
-          - License: MIT (see `upstream/nanobot/LICENSE`)
-
-          This is a one-time source import, not an automatically updating mirror.
-          Before syncing again, review upstream changes and preserve local modifications.
-          EOF
+          printf '%s\n' \
+            '# Upstream source' \
+            '' \
+            '- Project: https://github.com/HKUDS/nanobot' \
+            "- Revision: $version" \
+            '- Imported as a source snapshot under upstream/nanobot/' \
+            '- License: MIT (see upstream/nanobot/LICENSE)' \
+            '' \
+            'This is a one-time source import, not an automatically updating mirror.' \
+            'Before syncing again, review upstream changes and preserve local modifications.' \
+            > UPSTREAM.md
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
