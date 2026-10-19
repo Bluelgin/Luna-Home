@@ -1,0 +1,19 @@
+# Runtime state and local secrets must never be committed.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+deploy/data/
+logs/
+media/
+*.db
+*.sqlite
+*.sqlite3
+*.onnx
+*.onnx.json
+__pycache__/
+*.py[cod]
+.venv/
+.envrc
