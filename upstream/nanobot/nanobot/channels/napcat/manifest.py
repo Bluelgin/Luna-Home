@@ -11,6 +11,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "allowFrom": field("list"),
         "privateOnly": field("bool", default=False),
         "ownerQq": field(default=""),
+        "maxMessagesPerMinute": field("int", default=30),
         "enableVoiceInput": field("bool", default=False),
         "maxAudioBytes": field("int", default=10 * 1024 * 1024),
         "sharedRecordDir": field(default=""),
