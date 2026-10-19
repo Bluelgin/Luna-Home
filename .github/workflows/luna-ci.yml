@@ -2,9 +2,9 @@ name: Luna QQ tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/luna-qq-natural-timing-proactive]
   pull_request:
-    branches: [main]
+    branches: [main, docs/qq-napcat-multimodal-memory-plan, feat/luna-adorable-dragon-persona]
   workflow_dispatch:
 
 concurrency:
@@ -21,7 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify QQ and backup source syntax without dependencies
-        run: python3 -m compileall -q upstream/nanobot/nanobot/channels/napcat deploy/backup_luna.py
+        run: |
+          python3 -m compileall -q upstream/nanobot/nanobot/channels/napcat deploy/backup_luna.py deploy/preflight.py
+          python3 deploy/preflight.py
       - name: Verify memory backup behavior
         run: python3 deploy/test_backup.py
   tests:

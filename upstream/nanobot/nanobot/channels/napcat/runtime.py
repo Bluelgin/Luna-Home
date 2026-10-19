@@ -10,6 +10,7 @@ import random
 import time
 import uuid
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -27,6 +28,8 @@ from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.channels.napcat.ledger import MessageLedger
 from nanobot.channels.napcat.media_audio import RecordMediaError, resolve_record
 from nanobot.channels.napcat.piper_tts import synthesize_voice
+from nanobot.channels.napcat.natural_chat import split_for_qq
+from nanobot.channels.napcat.proactive import CheckinLedger, CheckinPolicy, choose_greeting
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import validate_url_target
@@ -58,6 +61,19 @@ class NapcatConfig(Base):
     # Explicit opt-in: no voice/persona/voice model chosen by default.
     tts_model_path: str = ""
     tts_executable: str = "piper"
+    # QQ message pacing is only applied to explicit owner private chat.
+    natural_chat_enabled: bool = True
+    reply_delay_min_seconds: float = Field(default=0.8, ge=0, le=10)
+    reply_delay_max_seconds: float = Field(default=2.5, ge=0, le=10)
+    chunk_delay_min_seconds: float = Field(default=0.7, ge=0, le=10)
+    chunk_delay_max_seconds: float = Field(default=2.0, ge=0, le=10)
+    max_chat_chunks: int = Field(default=3, ge=1, le=5)
+    proactive_checkins_enabled: bool = False
+    proactive_timezone: str = "Asia/Shanghai"
+    proactive_start_hour: int = Field(default=11, ge=0, le=23)
+    proactive_end_hour: int = Field(default=20, ge=1, le=24)
+    proactive_min_idle_minutes: int = Field(default=180, ge=0, le=10080)
+    proactive_probability: float = Field(default=0.35, ge=0.0, le=1.0)
     ws_url: str = "ws://127.0.0.1:3001"
     access_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
@@ -97,6 +113,10 @@ class NapcatChannel(BaseChannel):
         self._ledger = MessageLedger(get_runtime_subdir("napcat") / "processed.sqlite3")
         self._voice_reply_on: set[str] = set()
         self._owner_message_times: deque[float] = deque()
+        self._owner_last_inbound_at = time.monotonic()
+        self._owner_message_revision = 0
+        self._send_lock = asyncio.Lock()
+        self._checkin_ledger = CheckinLedger(get_runtime_subdir("napcat") / "checkins.sqlite3")
 
 
     # ------------------------------------------------------------------
@@ -108,12 +128,28 @@ class NapcatChannel(BaseChannel):
             not self.config.owner_qq.isdigit() or "*" in self.config.allow_from
         ):
             raise ValueError("napcat privateOnly requires a numeric ownerQq and no wildcard allowFrom")
+        if self.config.reply_delay_min_seconds > self.config.reply_delay_max_seconds:
+            raise ValueError("napcat: reply delay min exceeds max")
+        if self.config.chunk_delay_min_seconds > self.config.chunk_delay_max_seconds:
+            raise ValueError("napcat: chunk delay min exceeds max")
+        if self.config.proactive_checkins_enabled:
+            if not self.config.private_only:
+                raise ValueError("napcat: proactive checkins require privateOnly")
+            CheckinPolicy(
+                timezone=self.config.proactive_timezone,
+                start_hour=self.config.proactive_start_hour,
+                end_hour=self.config.proactive_end_hour,
+                min_idle_seconds=self.config.proactive_min_idle_minutes * 60,
+                probability=self.config.proactive_probability,
+            )
         if not self.config.ws_url:
             logger.error("napcat: ws_url not configured")
             return
 
         self._running = True
         self._http = aiohttp.ClientSession(timeout=_DOWNLOAD_TIMEOUT)
+        if self.config.proactive_checkins_enabled:
+            self._create_background_task(self._proactive_loop(), "proactive")
 
         backoff = iter((5, 10))  # then 30s forever
         while self._running:
@@ -298,6 +334,8 @@ class NapcatChannel(BaseChannel):
                 logger.warning("napcat: owner message rate limit exceeded")
                 return
             self._owner_message_times.append(now)
+            self._owner_last_inbound_at = now
+            self._owner_message_revision += 1
 
         segments = self._normalize_segments(ev.get("message"))
         text, images, mentioned_self, reply_to_id = self._parse_segments(segments)
@@ -549,17 +587,22 @@ class NapcatChannel(BaseChannel):
         ):
             raise DeliveryRejectedError("napcat: privateOnly rejects outbound non-owner chat")
 
-        segments: list[dict[str, Any]] = []
-        for ref in msg.media or []:
-            if seg := await self._build_image_segment(ref):
-                segments.append(seg)
-        if text := (msg.content or "").strip():
-            voice_requested = (
-                kind == "private" and self.config.private_only
+        async with self._send_lock:
+            # Snapshot when delivery actually starts. A new owner message
+            # cancels remaining chunks of the previous answer.
+            revision = self._owner_message_revision
+            segments: list[dict[str, Any]] = []
+            for ref in msg.media or []:
+                if seg := await self._build_image_segment(ref):
+                    segments.append(seg)
+            text = (msg.content or "").strip()
+            meta = msg.metadata or {}
+            voice_requested = bool(
+                text and kind == "private" and self.config.private_only
                 and target == self.config.owner_qq
                 and msg.chat_id in self._voice_reply_on
-                and not msg.metadata.get("force_text")
-                and bool(self.config.tts_model_path)
+                and not meta.get("force_text")
+                and self.config.tts_model_path
             )
             if voice_requested:
                 audio = await synthesize_voice(
@@ -570,31 +613,79 @@ class NapcatChannel(BaseChannel):
                     segments.append({"type": "record", "data": {
                         "file": "base64://" + base64.b64encode(audio).decode("ascii")
                     }})
-            if not any(seg.get("type") == "record" for seg in segments):
-                segments.append({"type": "text", "data": {"text": text}})
-        if not segments:
-            return
+            # Keep media/commands/notifications/technical messages intact.
+            split_chat = (
+                text and self.config.private_only and self.config.natural_chat_enabled
+                and not (msg.media or []) and not voice_requested
+                and msg.event is None and not meta.get("force_text")
+                and not meta.get("luna_proactive")
+            )
+            text_chunks = (
+                split_for_qq(text, max_parts=self.config.max_chat_chunks)
+                if split_chat else ([text] if text else [])
+            )
+            messages: list[list[dict[str, Any]]] = []
+            if segments:
+                if text_chunks:
+                    segments.append({"type": "text", "data": {"text": text_chunks[0]}})
+                    text_chunks = text_chunks[1:]
+                messages.append(segments)
+            messages += [[{"type": "text", "data": {"text": chunk}}] for chunk in text_chunks]
+            if not messages:
+                return
 
-        params: dict[str, Any] = {"message": segments}
-        if kind == "group":
-            params["message_type"] = "group"
-            params["group_id"] = int(target)
-        else:
-            params["message_type"] = "private"
-            params["user_id"] = int(target)
+            # Model response time counts as thinking time; don't add a fake
+            # delay if the user has already waited long enough.
+            if (self.config.private_only and self.config.natural_chat_enabled
+                    and not meta.get("luna_proactive") and msg.event is None):
+                elapsed = time.monotonic() - self._owner_last_inbound_at
+                planned = random.uniform(
+                    self.config.reply_delay_min_seconds,
+                    self.config.reply_delay_max_seconds,
+                )
+                if remaining := max(0.0, planned - elapsed):
+                    await asyncio.sleep(remaining)
+            if revision != self._owner_message_revision and split_chat:
+                return
 
+            for index, wire_segments in enumerate(messages):
+                if index:
+                    gap = random.uniform(
+                        self.config.chunk_delay_min_seconds,
+                        self.config.chunk_delay_max_seconds,
+                    )
+                    if gap > 0:
+                        await asyncio.sleep(gap)
+                    if revision != self._owner_message_revision:
+                        logger.debug("napcat: stopped stale QQ reply after owner interruption")
+                        break
+                params: dict[str, Any] = {"message": wire_segments}
+                if kind == "group":
+                    params["message_type"] = "group"
+                    params["group_id"] = int(target)
+                else:
+                    params["message_type"] = "private"
+                    params["user_id"] = int(target)
+                try:
+                    await self._send_wire(params, text)
+                except Exception:
+                    # If a later chunk fails, don't ask upper layers to retry
+                    # a message with already-delivered earlier chunks.
+                    if index:
+                        logger.exception("napcat: partial QQ reply, tail not delivered")
+                        return
+                    raise
+
+    async def _send_wire(self, params: dict[str, Any], text: str) -> None:
+        wire_segments = params["message"]
         try:
             resp = await self._call_action("send_msg", params)
         except RuntimeError as exc:
-            # Fall back only on an explicit OneBot rejection, never on an
-            # uncertain network timeout (which could duplicate delivery).
-            if (any(seg.get("type") == "record" for seg in segments)
+            if (any(seg.get("type") == "record" for seg in wire_segments)
                     and "action send_msg failed" in str(exc)
-                    and (msg.content or "").strip()):
+                    and text):
                 logger.warning("napcat: voice rejected by QQ; falling back to text")
-                params["message"] = [{"type": "text", "data": {
-                    "text": msg.content.strip()
-                }}]
+                params["message"] = [{"type": "text", "data": {"text": text}}]
                 resp = await self._call_action("send_msg", params)
             else:
                 raise
@@ -602,6 +693,40 @@ class NapcatChannel(BaseChannel):
         data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
         if (mid := data.get("message_id")) is not None:
             self._bot_outbound_ids.append(int(mid))
+
+    async def _proactive_loop(self) -> None:
+        """Offer at most one opt-in, non-model-generated friendly ping per day."""
+        policy = CheckinPolicy(
+            timezone=self.config.proactive_timezone,
+            start_hour=self.config.proactive_start_hour,
+            end_hour=self.config.proactive_end_hour,
+            min_idle_seconds=self.config.proactive_min_idle_minutes * 60,
+            probability=self.config.proactive_probability,
+        )
+        while self._running:
+            await asyncio.sleep(300)
+            if self._ws is None:
+                continue
+            instant = datetime.now(timezone.utc)
+            if not policy.eligible(
+                instant, time.monotonic() - self._owner_last_inbound_at,
+                self.config.owner_qq,
+            ):
+                continue
+            day = policy.local_day(instant)
+            # Claim BEFORE delivery: prevents duplicate surprise messages after
+            # reconnect/power loss, at the expense of a missed ping on failure.
+            try:
+                if not self._checkin_ledger.claim(self.config.owner_qq, day):
+                    continue
+                await self.send(OutboundMessage(
+                    channel=self.name,
+                    chat_id=f"private:{self.config.owner_qq}",
+                    content=choose_greeting(self.config.owner_qq, day),
+                    metadata={"luna_proactive": True, "force_text": True},
+                ))
+            except Exception as exc:
+                logger.warning("napcat: proactive ping not delivered: {}", exc)
 
     async def _build_image_segment(self, ref: str) -> dict[str, Any] | None:
         ref = (ref or "").strip()

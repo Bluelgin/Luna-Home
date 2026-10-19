@@ -16,7 +16,8 @@ sudo apt update
 sudo apt install -y git python3 python3-venv python3-pip ffmpeg
 # 按 Docker 官方手册安装 Docker Engine 和 docker compose plugin
 sudo useradd --system --home-dir /var/lib/luna --create-home --shell /usr/sbin/nologin luna || true
-sudo mkdir -p /opt/luna-home /etc/luna-home
+sudo mkdir -p /opt /etc/luna-home
+# 目标目录首次不存在时才能执行 git clone
 sudo git clone https://github.com/Bluelgin/Luna-Home.git /opt/luna-home
 # 若 PR 尚未合并，明确切到已提交实现的 PR 开发分支：
 cd /opt/luna-home
@@ -163,3 +164,41 @@ sudo systemctl restart luna-nanobot
 ```
 
 安装器仅触及 `SOUL.md`，绝不改写 `USER.md`、`memory/MEMORY.md`、历史 SQLite、授权凭据。旧 SOUL 备份在 workspace 下的 `.luna-soul-backups/`，这不是 GitHub 备份路径。若你希望修改人格，请在 GitHub 上改版本模板，再运行安装器进行显式替换。
+
+
+## 12. QQ 自然回复与插话打断
+
+Luna 在 privateOnly 模式下，一次模型生成的回答可拆成 1–3 条 QQ 小气泡，**不会每拆一条就多调用模型**。
+
+- `naturalChatEnabled=true`：只拆闲聊句；代码块、网址、列表、图、语音和事件消息保持完整。
+- `replyDelayMinSeconds=0.8` / `replyDelayMaxSeconds=2.5`：先抵扣已经等待模型的时间，避免长时间额外等待。
+- `chunkDelayMinSeconds=0.7` / `chunkDelayMaxSeconds=2.0`：拆分的消息之间产生有限随机间隔。
+- `maxChatChunks=3`：最多三条。若你在其中插话，后续旧气泡会被取消（已经发送的不会撤回）。
+- 若一段已成功发送、下一段失败，停止本次剩余发送，不请求重试整条，以免重复。
+
+### 主动问候：需要你主动开启
+
+`proactiveCheckinsEnabled=false` 是默认值。改为 `true` 才启用。
+在完整 config.json 的 channels.napcat 里配置 `proactiveTimezone`、`proactiveStartHour=11`、`proactiveEndHour=20`、`proactiveMinIdleMinutes=180`、`proactiveProbability=0.35`。
+
+仅在你授权的本地时间窗口与已经超过 3 小时没有 QQ 消息时尝试；每天最多一条，并以固定每日概率约 35% 决定是否发送，当日记录持久化以防重启重复。发出的只是预写的轻量龙娘问候，**不调用模型、不消耗 Plus 额度**。不会假装她现实生活中经历了什么。若要固定时间提醒或条件事件通知，使用 nanobot 原生 Cron/Heartbeat 并让你确认；不拿随机问候代替明确提醒。
+
+随时把 `proactiveCheckinsEnabled` 调回 false 后重启网关。不要高频骚扰 QQ；NapCat 仍有非官方账号风控风险。
+
+## 13. 主板到手前的软件检查
+
+无需 QQ 或 Plus 登录便可用 Python 检查：
+
+```bash
+python3 deploy/preflight.py
+python3 -m unittest discover -s persona/luna-dragon -p 'test_persona.py' -v
+python3 deploy/test_backup.py
+```
+
+拿到 Debian 主机并创建真正的私有配置后检查环境：
+
+```bash
+python3 deploy/preflight.py --host --config /var/lib/luna/.nanobot/config.json
+```
+
+检查器不会登录账号、不会打印任何 Token。仍需真实 Linux 主机的 Docker/NapCat、QQ 扫码、Plus 可用模型和音频后端验证。CI 没有通过之前，不能视为已完成生产验收。
