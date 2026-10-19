@@ -471,6 +471,8 @@ class NapcatChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def _on_notice(self, ev: dict[str, Any]) -> None:
+        if self.config.private_only:
+            return
         if ev.get("notice_type") != "group_increase" or not self.config.welcome_new_members:
             return
 
@@ -530,6 +532,10 @@ class NapcatChannel(BaseChannel):
         kind, _, target = msg.chat_id.partition(":")
         if kind not in ("private", "group") or not target:
             raise DeliveryRejectedError("napcat: invalid chat_id")
+        if self.config.private_only and (
+            kind != "private" or target != self.config.owner_qq
+        ):
+            raise DeliveryRejectedError("napcat: privateOnly rejects outbound non-owner chat")
 
         segments: list[dict[str, Any]] = []
         for ref in msg.media or []:
