@@ -20,8 +20,10 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Verify QQ source syntax without dependencies
-        run: python3 -m compileall -q upstream/nanobot/nanobot/channels/napcat
+      - name: Verify QQ and backup source syntax without dependencies
+        run: python3 -m compileall -q upstream/nanobot/nanobot/channels/napcat deploy/backup_luna.py
+      - name: Verify memory backup behavior
+        run: python3 deploy/test_backup.py
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
