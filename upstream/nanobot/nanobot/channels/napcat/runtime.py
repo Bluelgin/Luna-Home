@@ -49,6 +49,7 @@ class NapcatConfig(Base):
     # Strict owner-only mode is opt-in to preserve upstream's other QQ uses.
     private_only: bool = False
     owner_qq: str = ""
+    max_messages_per_minute: int = Field(default=30, ge=1, le=600)
     # Audio transcription uses the globally configured nanobot ASR provider.
     enable_voice_input: bool = False
     max_audio_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
@@ -95,6 +96,8 @@ class NapcatChannel(BaseChannel):
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._ledger = MessageLedger(get_runtime_subdir("napcat") / "processed.sqlite3")
         self._voice_reply_on: set[str] = set()
+        self._owner_message_times: deque[float] = deque()
+
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -286,6 +289,15 @@ class NapcatChannel(BaseChannel):
                 if self.config.private_only:
                     return
             self._processed_ids.append(msg_id)
+
+        if self.config.private_only:
+            now = time.monotonic()
+            while self._owner_message_times and now - self._owner_message_times[0] >= 60:
+                self._owner_message_times.popleft()
+            if len(self._owner_message_times) >= self.config.max_messages_per_minute:
+                logger.warning("napcat: owner message rate limit exceeded")
+                return
+            self._owner_message_times.append(now)
 
         segments = self._normalize_segments(ev.get("message"))
         text, images, mentioned_self, reply_to_id = self._parse_segments(segments)
