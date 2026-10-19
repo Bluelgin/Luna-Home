@@ -1,6 +1,6 @@
 # Luna-Home：私人 QQ / NapCat / nanobot 多模态与记忆架构（设计方案）
 
-> 状态：**设计稿，尚未实施及实机验收**。目标为 Linux 旧主机常驻、一个独立 QQ 账号、仅主人 QQ 私聊。上游源码固定在 `upstream/nanobot/`；上游版本详见 `UPSTREAM.md`。本设计以仓库当前 `nanobot/channels/napcat/runtime.py`、`manifest.py` 和上游文档为依据。
+> 状态：**方案与首轮代码实现已提交，GitHub CI 验证进行中；尚未 Linux / QQ 实机验收**。目标为 Linux 旧主机常驻、一个独立 QQ 账号、仅主人 QQ 私聊。上游源码固定在 `upstream/nanobot/`；上游版本详见 `UPSTREAM.md`。本设计以仓库当前 `nanobot/channels/napcat/runtime.py`、`manifest.py` 和上游文档为依据。
 
 ## 1. 目标与边界
 
@@ -215,31 +215,31 @@ OneBot record segment
 
 ## 12. 分阶段实施与验收
 
-### Phase A / 普通聊天
+### Phase A / 普通聊天（代码已实现，需验证）
 - [ ] NapCat Linux Docker 登录独立 QQ 号。
 - [ ] 可从主 QQ 私聊收到并回复文字。
 - [ ] 其他 QQ 号、群消息（包括主号在群里 @）全部拒绝，且不发生媒体下载/模型调用。
 - [ ] 1 分钟内重复 WebSocket 消息不造成重复发言。
 
-### Phase B / 图片
+### Phase B / 图片（基础代码已存在，需视觉模型和实机验证）
 - [ ] 私聊单图、多图、截图可解读（视觉模型确实支持）。
 - [ ] 无视觉能力时准确告知，不编造图片内容。
 - [ ] 超大图片/恶意 URL/下载超时/无效 MIME 安全失败。
 - [ ] 入站原图能按 TTL 清理，出站仅受控路径。
 
-### Phase C / QQ 语音
+### Phase C / QQ 语音（转写与 Piper 出站通路已实现，音色及实机未验收）
 - [ ] 真机录制 QQ 短语音，验证 NapCat 当前 `record` 数据结构与取文件操作。
 - [ ] QQ Silk/AMR/其他支持格式可转码成 ASR 可接受的格式。
 - [ ] 语音识别转入相同私聊上下文，ASR 失败降级文字说明。
 - [ ] 请求语音回复时能发送实际可播放的 QQ 语音消息；失败退回文字。
 
-### Phase D / 记忆
+### Phase D / 记忆（复用上游；SOUL 人设需要和用户讨论）
 - [ ] 重启服务后能接续最近对话。
 - [ ] Dream 确实提炼长期记忆，而不是凭空声称“记住了”。
 - [ ] /memory 可查看，/forget 对各存储层和备份策略说明真实清理范围。
 - [ ] 可完成 SQLite / 长期记忆数据备份并恢复。
 
-### Phase E / 运维
+### Phase E / 运维（部署文件已写，待服务器联调）
 - [ ] 电源重启后两服务自动拉起，QQ 重新连接（需要扫码则提示）。
 - [ ] 不暴露公网管理端口，密钥权限 0600 / 环境变量安全。
 - [ ] GitHub Actions 运行静态检查、单元测试、Mock OneBot 事件回放。
