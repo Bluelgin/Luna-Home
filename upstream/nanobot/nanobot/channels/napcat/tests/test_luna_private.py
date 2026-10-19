@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.napcat.ledger import MessageLedger
@@ -166,3 +167,41 @@ def test_configuration_aliases():
     })
     assert cfg.private_only and cfg.owner_qq == "123456"
     assert cfg.enable_voice_input and cfg.max_audio_bytes == 2000000
+
+@pytest.mark.asyncio
+async def test_outbound_cannot_target_anyone_else():
+    channel = private_channel()
+    channel._ws = object()
+    with pytest.raises(DeliveryRejectedError):
+        await channel.send(
+            OutboundMessage(channel="napcat", chat_id="private:666666", content="secret")
+        )
+    with pytest.raises(DeliveryRejectedError):
+        await channel.send(
+            OutboundMessage(channel="napcat", chat_id="group:1234", content="secret")
+        )
+
+
+@pytest.mark.asyncio
+async def test_napcat_voice_send_rejection_falls_back_to_text(monkeypatch):
+    channel = private_channel()
+    channel._ws = object()
+    channel.config.tts_model_path = "/placeholder.onnx"
+    channel._voice_reply_on.add("private:123456")
+    sent = []
+
+    async def fake_synthesize(*args):
+        return b"audio"
+
+    async def fake_action(action, params):
+        sent.append(params["message"])
+        if params["message"][0]["type"] == "record":
+            raise RuntimeError("napcat: action send_msg failed status='failed' retcode=1400")
+        return {"data": {"message_id": 999}}
+
+    monkeypatch.setattr("nanobot.channels.napcat.runtime.synthesize_voice", fake_synthesize)
+    monkeypatch.setattr(channel, "_call_action", fake_action)
+    await channel.send(
+        OutboundMessage(channel="napcat", chat_id="private:123456", content="你好")
+    )
+    assert [frames[0]["type"] for frames in sent] == ["record", "text"]
