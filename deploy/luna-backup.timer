@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Luna private memory and session backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
