@@ -2,7 +2,7 @@
 
 一个基于 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 的个人自托管 AI 助手实验项目，计划在旧 Linux 主机上 24/7 运行。
 
-> 项目仓库原名为 `Bluelgin/-`。建议在 GitHub **Settings → General → Repository name** 中改为 `Luna-Home`。
+> 本仓库已更名为 **Luna-Home**。QQ 接入代码与新龙娘人设目前通过独立 PR 逐步验证，部署前请检查 PR 合并情况。
 
 ## 上游项目
 
@@ -28,7 +28,7 @@ python -m pip install -e .
 nanobot webui
 ```
 
-> 在仓库改名之前，克隆地址请暂用 `https://github.com/Bluelgin/-.git`。部分最新源码构建 UI/TUI 还需要 Bun；具体以 `upstream/nanobot/docs/quick-start.md` 为准，稳定部署更建议官方发布包。
+> 部分最新源码构建 UI/TUI 还需要 Bun；具体以 `upstream/nanobot/docs/quick-start.md` 为准。私人 QQ 小号部署见 [`deploy/README.md`](deploy/README.md)。
 
 OpenAI Codex OAuth（与 OpenAI 新版 Sign in with ChatGPT / SIWC 是**两套不同接入机制**）：
 
@@ -37,6 +37,13 @@ nanobot provider login openai-codex --set-main
 ```
 
 在浏览器/终端完成官方登录，然后从在线模型目录选择账号实际可用的模型。**不要假定一定有 `gpt-6-luna`；应以实际模型目录为准。** 若后续要实现 SIWC，需要额外开发独立的授权适配器，不能直接复用 Codex OAuth 当作 SIWC。
+
+## Luna 小龙娘人设
+
+- 角色：**白紫色的小龙娘，呆萌但不迷糊地办事**。QQ 日常聊天自然亲近，代码、学习场景认真可靠。
+- 正式可执行角色模板：[`persona/luna-dragon/SOUL.md`](persona/luna-dragon/SOUL.md)。
+- 角色卡、视觉规范、交互示例和安全安装工具：[`persona/luna-dragon/README.md`](persona/luna-dragon/README.md)。
+- 角色模板只在明确运行安装器后进入 nanobot workspace；不会自动上传私人聊天、覆盖现有记忆或指定声音。
 
 ## 安全边界
 
@@ -47,7 +54,7 @@ nanobot provider login openai-codex --set-main
 
 ## 开发计划
 
-- [ ] 从上游导入完整源代码并保留 MIT 授权
+- [x] 从上游导入完整源代码并保留 MIT 授权
 - [ ] 在 Linux 本地验证 WebUI 和 Codex OAuth
 - [ ] 验证账号能否通过模型列表调用 Luna
 - [ ] 按需开发官方 Sign in with ChatGPT（SIWC）支持

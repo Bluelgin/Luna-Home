@@ -1,0 +1,27 @@
+name: Luna personality tests
+
+on:
+  push:
+    branches:
+      - feat/luna-adorable-dragon-persona
+  pull_request:
+    branches:
+      - main
+      - docs/qq-napcat-multimodal-memory-plan
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  persona-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Python installer syntax
+        run: python3 -m py_compile persona/luna-dragon/install.py persona/luna-dragon/test_persona.py
+      - name: Check portable character card JSON
+        run: python3 -m json.tool persona/luna-dragon/character_card_v2.json > /dev/null
+      - name: Test offline persona install and backup rules
+        run: python3 -m unittest discover -s persona/luna-dragon -p 'test_*.py' -v
