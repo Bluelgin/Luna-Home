@@ -6,6 +6,7 @@
       "accessToken": "${NAPCAT_WS_TOKEN}",
       "privateOnly": true,
       "ownerQq": "REPLACE_WITH_YOUR_MAIN_QQ",
+      "maxMessagesPerMinute": 30,
       "allowFrom": ["REPLACE_WITH_YOUR_MAIN_QQ"],
       "groupPolicy": "mention",
       "welcomeNewMembers": false,
