@@ -571,7 +571,21 @@ class NapcatChannel(BaseChannel):
             params["message_type"] = "private"
             params["user_id"] = int(target)
 
-        resp = await self._call_action("send_msg", params)
+        try:
+            resp = await self._call_action("send_msg", params)
+        except RuntimeError as exc:
+            # Fall back only on an explicit OneBot rejection, never on an
+            # uncertain network timeout (which could duplicate delivery).
+            if (any(seg.get("type") == "record" for seg in segments)
+                    and "action send_msg failed" in str(exc)
+                    and (msg.content or "").strip()):
+                logger.warning("napcat: voice rejected by QQ; falling back to text")
+                params["message"] = [{"type": "text", "data": {
+                    "text": msg.content.strip()
+                }}]
+                resp = await self._call_action("send_msg", params)
+            else:
+                raise
         raw_data = resp.get("data")
         data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
         if (mid := data.get("message_id")) is not None:
