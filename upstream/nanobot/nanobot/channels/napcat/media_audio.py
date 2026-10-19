@@ -6,7 +6,7 @@ import asyncio
 import base64
 import binascii
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable
 
 import aiohttp
@@ -58,14 +58,28 @@ async def _fetch_audio(
     return bytes(data)
 
 
-async def _read_shared_path(path: str, root: str, max_bytes: int) -> bytes:
+async def _read_shared_path(path: str, root: str, max_bytes: int, remote_root: str = "") -> bytes:
     if not root:
         raise RecordMediaError(
             "NapCat returned a local audio path inaccessible to nanobot; "
             "configure sharedRecordDir and mount the directory read-only"
         )
     safe_root = Path(root).expanduser().resolve(strict=True)
-    candidate = Path(path).resolve(strict=True)
+    # A container may return /app/.config/QQ/... while nanobot runs on the host.
+    # Only map an explicit remote prefix into a fixed local mount.
+    if remote_root:
+        prefix = PurePosixPath(remote_root)
+        remote = PurePosixPath(path)
+        if (not remote.is_absolute() or not prefix.is_absolute()
+                or str(prefix) == "/" or ".." in remote.parts):
+            raise RecordMediaError("invalid remote audio path")
+        try:
+            relative = remote.relative_to(prefix)
+        except ValueError as exc:
+            raise RecordMediaError("remote audio path outside configured mount") from exc
+        candidate = (safe_root / str(relative)).resolve(strict=True)
+    else:
+        candidate = Path(path).resolve(strict=True)
     if not candidate.is_relative_to(safe_root) or not candidate.is_file():
         raise RecordMediaError("audio path outside shared record directory")
     if candidate.stat().st_size > max_bytes:
@@ -84,6 +98,7 @@ async def resolve_record(
     *,
     max_bytes: int,
     shared_root: str = "",
+    remote_root: str = "",
 ) -> Path:
     """Ask NapCat to transcode QQ Silk/AMR to MP3, then copy into local sandbox.
 
@@ -118,7 +133,7 @@ async def resolve_record(
         audio = await _fetch_audio(url, http, max_bytes)
     elif isinstance(converted, str):
         try:
-            audio = await _read_shared_path(converted, shared_root, max_bytes)
+            audio = await _read_shared_path(converted, shared_root, max_bytes, remote_root)
         except (OSError, ValueError) as exc:
             raise RecordMediaError("shared audio file unavailable") from exc
     else:
