@@ -205,3 +205,12 @@ async def test_napcat_voice_send_rejection_falls_back_to_text(monkeypatch):
         OutboundMessage(channel="napcat", chat_id="private:123456", content="你好")
     )
     assert [frames[0]["type"] for frames in sent] == ["record", "text"]
+
+@pytest.mark.asyncio
+async def test_owner_rate_limit_stops_model_messages(tmp_path):
+    channel = private_channel()
+    channel.config.max_messages_per_minute = 1
+    channel._ledger = MessageLedger(tmp_path / "processed.db")
+    await channel._on_message(message(message_id=200))
+    await channel._on_message(message(message_id=201))
+    assert channel.bus.inbound_size == 1
