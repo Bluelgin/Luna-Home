@@ -143,3 +143,23 @@ cd /opt/luna-home
 - `get_record` 返回的音频文件位置依版本而异，需要你的 NapCat 真机回放测试。Piper 音色未选择前不能端到端验收发送语音。
 - 本地代码测试、GitHub CI、Docker 实机测试是不同的验证层级；CI 通过不代表 QQ 平台实际协议或 OpenAI OAuth 必定成功。
 - 未来更新上游 nanobot 需手工审阅差异，避免覆盖 Luna 特有的安全/音频补丁。
+
+## 11. Luna 白紫小龙娘人设（明确安装才生效）
+
+已提供 [`persona/luna-dragon/`](../persona/luna-dragon/README.md) 中的正式 `SOUL.md`、SillyTavern V2 角色卡和对话样例。该角色是**呆萌、好奇、亲近、严谨**的 GPT 系二次元龙娘，同人灵感不等于 OpenAI 官方角色。**本次不定稿专属配音，也不以“呆萌”为由产生错误答案。**
+
+```bash
+# 先预览，不修改既有 nanobot 记忆
+sudo -u luna env HOME=/var/lib/luna /opt/luna-home/.venv/bin/python \
+  /opt/luna-home/persona/luna-dragon/install.py \
+  --workspace /var/lib/luna/.nanobot/workspace
+
+# 如果 nanobot 已初始化自己的 SOUL.md，想采用 Luna 时显式备份并替换
+sudo -u luna env HOME=/var/lib/luna /opt/luna-home/.venv/bin/python \
+  /opt/luna-home/persona/luna-dragon/install.py \
+  --workspace /var/lib/luna/.nanobot/workspace --apply --replace
+
+sudo systemctl restart luna-nanobot
+```
+
+安装器仅触及 `SOUL.md`，绝不改写 `USER.md`、`memory/MEMORY.md`、历史 SQLite、授权凭据。旧 SOUL 备份在 workspace 下的 `.luna-soul-backups/`，这不是 GitHub 备份路径。若你希望修改人格，请在 GitHub 上改版本模板，再运行安装器进行显式替换。
