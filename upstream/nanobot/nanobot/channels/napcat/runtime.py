@@ -53,6 +53,7 @@ class NapcatConfig(Base):
     enable_voice_input: bool = False
     max_audio_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
     shared_record_dir: str = ""
+    shared_record_remote_root: str = ""
     # Explicit opt-in: no voice/persona/voice model chosen by default.
     tts_model_path: str = ""
     tts_executable: str = "piper"
@@ -305,6 +306,7 @@ class NapcatChannel(BaseChannel):
                         data, self._call_action, self._http, self._media_root,
                         max_bytes=self.config.max_audio_bytes,
                         shared_root=self.config.shared_record_dir,
+                        remote_root=self.config.shared_record_remote_root,
                     )
                 except (RecordMediaError, OSError) as exc:
                     logger.warning("napcat: voice record unavailable: {}", exc)
