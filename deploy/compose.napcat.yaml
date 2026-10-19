@@ -1,0 +1,21 @@
+# NapCat is an unofficial QQ bridge. Review risks before using a disposable QQ account.
+# Bind admin / OneBot endpoints only to loopback; configure Forward WS via its WebUI.
+services:
+  napcat:
+    image: ${NAPCAT_IMAGE:-mlikiowa/napcat-docker:latest}
+    container_name: luna-napcat
+    restart: unless-stopped
+    environment:
+      MODE: ws
+      WEBUI_TOKEN: ${NAPCAT_WEBUI_TOKEN:?Set_NAPCAT_WEBUI_TOKEN_in_private_env}
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+    ports:
+      - "127.0.0.1:6099:6099"
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./data/qq:/app/.config/QQ
+      - ./data/config:/app/napcat/config
+      - ./data/plugins:/app/napcat/plugins
+    security_opt:
+      - no-new-privileges:true
