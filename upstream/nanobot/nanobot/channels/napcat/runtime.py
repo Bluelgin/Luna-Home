@@ -23,7 +23,10 @@ from nanobot.bus.delivery import ChannelNotReadyError, DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import get_media_dir, get_runtime_subdir
+from nanobot.channels.napcat.ledger import MessageLedger
+from nanobot.channels.napcat.media_audio import RecordMediaError, resolve_record
+from nanobot.channels.napcat.piper_tts import synthesize_voice
 from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import validate_url_target
@@ -43,6 +46,18 @@ class NapcatConfig(Base):
     """Napcat (OneBot v11) channel configuration."""
 
     enabled: bool = False
+    # Strict owner-only mode is opt-in to preserve upstream's other QQ uses.
+    private_only: bool = False
+    owner_qq: str = ""
+    max_messages_per_minute: int = Field(default=30, ge=1, le=600)
+    # Audio transcription uses the globally configured nanobot ASR provider.
+    enable_voice_input: bool = False
+    max_audio_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+    shared_record_dir: str = ""
+    shared_record_remote_root: str = ""
+    # Explicit opt-in: no voice/persona/voice model chosen by default.
+    tts_model_path: str = ""
+    tts_executable: str = "piper"
     ws_url: str = "ws://127.0.0.1:3001"
     access_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
@@ -79,12 +94,20 @@ class NapcatChannel(BaseChannel):
         self._processed_ids: deque[int] = deque(maxlen=2000)
         self._bot_outbound_ids: deque[int] = deque(maxlen=2000)
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._ledger = MessageLedger(get_runtime_subdir("napcat") / "processed.sqlite3")
+        self._voice_reply_on: set[str] = set()
+        self._owner_message_times: deque[float] = deque()
+
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
+        if self.config.private_only and (
+            not self.config.owner_qq.isdigit() or "*" in self.config.allow_from
+        ):
+            raise ValueError("napcat privateOnly requires a numeric ownerQq and no wildcard allowFrom")
         if not self.config.ws_url:
             logger.error("napcat: ws_url not configured")
             return
@@ -238,16 +261,43 @@ class NapcatChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def _on_message(self, ev: dict[str, Any]) -> None:
-        msg_id = ev.get("message_id")
-        if isinstance(msg_id, int):
-            if msg_id in self._processed_ids:
-                return
-            self._processed_ids.append(msg_id)
-
         message_type = ev.get("message_type")
         user_id = ev.get("user_id")
         if user_id is None or message_type not in ("group", "private"):
             return
+        # Check authorization BEFORE image/audio downloads, resource allocation,
+        # and even parsing untrusted message segments. Paired users cannot
+        # bypass the explicit owner boundary.
+        if self.config.private_only:
+            if message_type != "private" or not self.config.owner_qq:
+                return
+            if str(user_id) != self.config.owner_qq:
+                return
+        elif not self.is_allowed(str(user_id)):
+            return
+
+        msg_id = ev.get("message_id")
+        if isinstance(msg_id, int):
+            if msg_id in self._processed_ids:
+                return
+            try:
+                if not self._ledger.claim(str(self._self_id or "unknown"), msg_id):
+                    return
+            except OSError as exc:
+                # In private mode a broken ledger must not cause replay storms.
+                logger.warning("napcat: dedup store unavailable: {}", exc)
+                if self.config.private_only:
+                    return
+            self._processed_ids.append(msg_id)
+
+        if self.config.private_only:
+            now = time.monotonic()
+            while self._owner_message_times and now - self._owner_message_times[0] >= 60:
+                self._owner_message_times.popleft()
+            if len(self._owner_message_times) >= self.config.max_messages_per_minute:
+                logger.warning("napcat: owner message rate limit exceeded")
+                return
+            self._owner_message_times.append(now)
 
         segments = self._normalize_segments(ev.get("message"))
         text, images, mentioned_self, reply_to_id = self._parse_segments(segments)
@@ -256,6 +306,32 @@ class NapcatChannel(BaseChannel):
         for info in images:
             if local := await self._download_image(info):
                 media_paths.append(local)
+
+        if self.config.enable_voice_input:
+            for seg in segments:
+                if seg.get("type") != "record":
+                    continue
+                raw_data = seg.get("data")
+                data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
+                try:
+                    audio_path = await resolve_record(
+                        data, self._call_action, self._http, self._media_root,
+                        max_bytes=self.config.max_audio_bytes,
+                        shared_root=self.config.shared_record_dir,
+                        remote_root=self.config.shared_record_remote_root,
+                    )
+                except (RecordMediaError, OSError) as exc:
+                    logger.warning("napcat: voice record unavailable: {}", exc)
+                    text += "\n[语音未能下载或解码，请尝试文字消息]"
+                    continue
+                try:
+                    transcript = await self.transcribe_audio(audio_path)
+                    text += (
+                        f"\n[语音转写] {transcript}"
+                        if transcript else "\n[语音转写服务尚不可用，请发送文字]"
+                    )
+                finally:
+                    await asyncio.to_thread(audio_path.unlink, missing_ok=True)
 
         sender_raw = ev.get("sender")
         sender = cast(dict[str, Any], sender_raw) if isinstance(sender_raw, dict) else {}
@@ -285,6 +361,23 @@ class NapcatChannel(BaseChannel):
         else:
             chat_id = f"private:{user_id}"
             content = text
+            # Private, explicit commands: no automatic spoken reply until
+            # the owner enables it and installs a configured local Piper voice.
+            command = text.strip().lower()
+            if self.config.private_only and command in ("/voice on", "/voice off"):
+                if command == "/voice on" and not self.config.tts_model_path:
+                    answer = "尚未配置 TTS 音色模型，语音回复没有开启。"
+                elif command == "/voice on":
+                    self._voice_reply_on.add(chat_id)
+                    answer = "语音回复已开启；输入 /voice off 关闭。"
+                else:
+                    self._voice_reply_on.discard(chat_id)
+                    answer = "已切换回文字回复。"
+                await self.send(OutboundMessage(
+                    channel=self.name, chat_id=chat_id, content=answer,
+                    metadata={"force_text": True},
+                ))
+                return
 
         if not content and not media_paths:
             return
@@ -390,6 +483,8 @@ class NapcatChannel(BaseChannel):
     # ------------------------------------------------------------------
 
     async def _on_notice(self, ev: dict[str, Any]) -> None:
+        if self.config.private_only:
+            return
         if ev.get("notice_type") != "group_increase" or not self.config.welcome_new_members:
             return
 
@@ -449,13 +544,34 @@ class NapcatChannel(BaseChannel):
         kind, _, target = msg.chat_id.partition(":")
         if kind not in ("private", "group") or not target:
             raise DeliveryRejectedError("napcat: invalid chat_id")
+        if self.config.private_only and (
+            kind != "private" or target != self.config.owner_qq
+        ):
+            raise DeliveryRejectedError("napcat: privateOnly rejects outbound non-owner chat")
 
         segments: list[dict[str, Any]] = []
         for ref in msg.media or []:
             if seg := await self._build_image_segment(ref):
                 segments.append(seg)
         if text := (msg.content or "").strip():
-            segments.append({"type": "text", "data": {"text": text}})
+            voice_requested = (
+                kind == "private" and self.config.private_only
+                and target == self.config.owner_qq
+                and msg.chat_id in self._voice_reply_on
+                and not msg.metadata.get("force_text")
+                and bool(self.config.tts_model_path)
+            )
+            if voice_requested:
+                audio = await synthesize_voice(
+                    text, self.config.tts_executable,
+                    self.config.tts_model_path, self._media_root,
+                )
+                if audio is not None:
+                    segments.append({"type": "record", "data": {
+                        "file": "base64://" + base64.b64encode(audio).decode("ascii")
+                    }})
+            if not any(seg.get("type") == "record" for seg in segments):
+                segments.append({"type": "text", "data": {"text": text}})
         if not segments:
             return
 
@@ -467,7 +583,21 @@ class NapcatChannel(BaseChannel):
             params["message_type"] = "private"
             params["user_id"] = int(target)
 
-        resp = await self._call_action("send_msg", params)
+        try:
+            resp = await self._call_action("send_msg", params)
+        except RuntimeError as exc:
+            # Fall back only on an explicit OneBot rejection, never on an
+            # uncertain network timeout (which could duplicate delivery).
+            if (any(seg.get("type") == "record" for seg in segments)
+                    and "action send_msg failed" in str(exc)
+                    and (msg.content or "").strip()):
+                logger.warning("napcat: voice rejected by QQ; falling back to text")
+                params["message"] = [{"type": "text", "data": {
+                    "text": msg.content.strip()
+                }}]
+                resp = await self._call_action("send_msg", params)
+            else:
+                raise
         raw_data = resp.get("data")
         data = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
         if (mid := data.get("message_id")) is not None:

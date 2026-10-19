@@ -1,0 +1,15 @@
+[Unit]
+Description=Luna memory/SQLite consistent private snapshot
+
+[Service]
+Type=oneshot
+User=luna
+Group=luna
+Environment=HOME=/var/lib/luna
+ExecStart=/opt/luna-home/.venv/bin/python /opt/luna-home/deploy/backup_luna.py --home /var/lib/luna/.nanobot --destination /var/lib/luna/backups --keep 7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/luna
+UMask=0077

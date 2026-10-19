@@ -1,0 +1,13 @@
+[Unit]
+Description=Remove expired QQ image/audio cache; do not touch Luna's memories
+
+[Service]
+Type=oneshot
+User=luna
+Group=luna
+ExecStart=/usr/bin/find /var/lib/luna/.nanobot/media/napcat -type f -mmin +1440 -delete
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/luna

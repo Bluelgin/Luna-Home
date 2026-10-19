@@ -1,0 +1,48 @@
+name: Luna QQ tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: luna-qq-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify QQ and backup source syntax without dependencies
+        run: python3 -m compileall -q upstream/nanobot/nanobot/channels/napcat deploy/backup_luna.py
+      - name: Verify memory backup behavior
+        run: python3 deploy/test_backup.py
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: upstream/nanobot/pyproject.toml
+      - name: Install nanobot + test dependencies
+        run: |
+          python -m pip install -e ./upstream/nanobot
+          python -m pip install pytest pytest-asyncio
+      - name: Compile NapCat Python modules
+        run: python -m compileall -q upstream/nanobot/nanobot/channels/napcat
+      - name: Run QQ regression tests
+        run: >
+          python -m pytest -q
+          upstream/nanobot/nanobot/channels/napcat/tests/
+          upstream/nanobot/tests/channels/test_qq_inbound_ssrf.py
+          upstream/nanobot/tests/channels/test_qq_reconnect_backoff.py

@@ -1,0 +1,26 @@
+[Unit]
+Description=Luna Home private QQ nanobot gateway
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=luna
+Group=luna
+Environment=HOME=/var/lib/luna
+EnvironmentFile=-/etc/luna-home/luna.env
+WorkingDirectory=/opt/luna-home/upstream/nanobot
+ExecStart=/opt/luna-home/.venv/bin/nanobot gateway
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/luna
+UMask=0077
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
