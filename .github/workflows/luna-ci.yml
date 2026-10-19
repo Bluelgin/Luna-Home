@@ -15,6 +15,13 @@ permissions:
   contents: read
 
 jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify QQ source syntax without dependencies
+        run: python3 -m compileall -q upstream/nanobot/nanobot/channels/napcat
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
