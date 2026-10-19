@@ -1,0 +1,70 @@
+name: Import nanobot source
+
+# One-time import when this workflow is first added. It can also be retried manually.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/import-nanobot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Luna Home
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Import MIT-licensed upstream code
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if test -f upstream/nanobot/LICENSE; then
+            echo "Upstream source already present; refusing to overwrite local changes."
+            exit 0
+          fi
+
+          git clone --depth 1 https://github.com/HKUDS/nanobot.git /tmp/luna-home-upstream
+          version="$(git -C /tmp/luna-home-upstream rev-parse HEAD)"
+
+          mkdir -p upstream/nanobot
+          rsync -a --exclude='.git/' /tmp/luna-home-upstream/ upstream/nanobot/
+
+          if ! test -s upstream/nanobot/LICENSE; then
+            echo "Missing upstream LICENSE, refusing import." >&2
+            exit 1
+          fi
+
+          cat > UPSTREAM.md <<EOF
+          # Upstream source
+
+          - Project: https://github.com/HKUDS/nanobot
+          - Revision: `$version`
+          - Imported as a source snapshot under `upstream/nanobot/`
+          - License: MIT (see `upstream/nanobot/LICENSE`)
+
+          This is a one-time source import, not an automatically updating mirror.
+          Before syncing again, review upstream changes and preserve local modifications.
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- upstream/nanobot UPSTREAM.md
+
+          if git diff --cached --quiet; then
+            echo "Nothing to import."
+            exit 0
+          fi
+
+          git commit -m "chore: import nanobot upstream snapshot at $version"
+          git push origin HEAD:main
