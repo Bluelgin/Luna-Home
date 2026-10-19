@@ -25,7 +25,7 @@ sudo git switch -c luna-qq --track origin/docs/qq-napcat-multimodal-memory-plan
 sudo python3 -m venv /opt/luna-home/.venv
 sudo /opt/luna-home/.venv/bin/python -m pip install --upgrade pip
 sudo /opt/luna-home/.venv/bin/python -m pip install -e /opt/luna-home/upstream/nanobot
-sudo /opt/luna-home/.venv/bin/nanobot plugins enable napcat
+sudo -u luna env HOME=/var/lib/luna /opt/luna-home/.venv/bin/nanobot plugins enable napcat
 ```
 
 最后一条仅启用插件；如果这个 nanobot 版本的 CLI 要求初始化 Home 或通过 WebUI 才允许启用，请按上游 `docs/chat-apps.md`，以 `luna` 用户执行而非 root。安装时请确认插件已启用、状态显示正常。
@@ -57,6 +57,7 @@ sudo chmod 600 /var/lib/luna/.nanobot/config.json /etc/luna-home/luna.env
 sudoedit /var/lib/luna/.nanobot/config.json
 sudoedit /etc/luna-home/luna.env
 sudo chown -R luna:luna /var/lib/luna
+# 纳入图片/语音共享目录时，按最低权限开放读取，不要让 Luna 读任意宿主机文件。
 ```
 
 - 在 `config.json` 中填写 `ownerQq`、`allowFrom`，两项必须是你**主 QQ 号**的字符串。
