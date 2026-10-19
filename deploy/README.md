@@ -72,8 +72,10 @@ sudo chown -R luna:luna /var/lib/luna
 sudo install -m 0644 deploy/luna-nanobot.service /etc/systemd/system/luna-nanobot.service
 sudo install -m 0644 deploy/luna-media-cleanup.service /etc/systemd/system/luna-media-cleanup.service
 sudo install -m 0644 deploy/luna-media-cleanup.timer /etc/systemd/system/luna-media-cleanup.timer
+sudo install -m 0644 deploy/luna-backup.service /etc/systemd/system/luna-backup.service
+sudo install -m 0644 deploy/luna-backup.timer /etc/systemd/system/luna-backup.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now luna-nanobot.service luna-media-cleanup.timer
+sudo systemctl enable --now luna-nanobot.service luna-media-cleanup.timer luna-backup.timer
 sudo systemctl status luna-nanobot.service
 sudo journalctl -u luna-nanobot.service -f
 ```
@@ -115,7 +117,9 @@ sudo journalctl -u luna-nanobot.service -f
 
 本阶段**不预设 Luna 的 SOUL.md 人设**。请先讨论性格、身份边界、昵称、表达风格与“什么值得记住”。可以先用 `/compact`、`/dream`、`/dream-log` 验证上游记忆可用；主动遗忘时要同时注意原始 SQLite 记录、历史摘要、备份与日志，并不能只删 MEMORY.md。
 
-记忆、图片原件、QQ 凭证及 API 凭证绝不上传 GitHub。将这些数据备份在外部加密存储中，定期演练恢复。
+已提供 `deploy/backup_luna.py` 与每天执行的 systemd timer，保存 `SOUL.md`、`USER.md`、`MEMORY.md`、压缩历史及 sessions 下 SQLite 的一致性快照，默认保留 7 份，写入 `/var/lib/luna/backups`，文件权限 0600；**此备份不包括 OAuth 令牌、NapCat QQ 登录状态和所有临时媒体文件**。备份自身仍包含私人聊天内容，复制到其他机器前请使用 age / GPG 等工具加密，定期做恢复演练。
+
+记忆、图片原件、QQ 凭证及 API 凭证绝不上传 GitHub。
 
 ## 9. 回归验证
 
