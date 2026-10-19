@@ -2,10 +2,14 @@ name: Luna QQ tests
 
 on:
   push:
-    branches: [main, "docs/qq-napcat-multimodal-memory-plan"]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: luna-qq-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
