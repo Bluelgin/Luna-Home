@@ -15,6 +15,8 @@ export default {
         { key: "channels.napcat.accessToken", section: "credentials" },
         { key: "channels.napcat.groupPolicy", section: "behavior" },
         { key: "channels.napcat.allowFrom", section: "access" },
+        { key: "channels.napcat.privateOnly", section: "access" },
+        { key: "channels.napcat.ownerQq", section: "access" },
       ],
     },
   },
