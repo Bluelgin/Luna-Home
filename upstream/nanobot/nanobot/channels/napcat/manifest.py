@@ -14,6 +14,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "enableVoiceInput": field("bool", default=False),
         "maxAudioBytes": field("int", default=10 * 1024 * 1024),
         "sharedRecordDir": field(default=""),
+        "sharedRecordRemoteRoot": field(default=""),
         "ttsModelPath": field(default=""),
         "ttsExecutable": field(default="piper"),
         "groupPolicy": field("enum", choices=DIRECT_GROUP_POLICIES, default="mention"),
